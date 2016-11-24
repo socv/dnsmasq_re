@@ -145,11 +145,37 @@ static unsigned int search_servers(time_t now, struct all_addr **addrpp, unsigne
       }
     else if (serv->flags & SERV_HAS_DOMAIN)
       {
-	unsigned int domainlen = strlen(serv->domain);
+	unsigned int domainlen = matchlen;
+	int serverhit = 0;
+
+#ifdef HAVE_REGEX
+	if (serv->flags & SERV_IS_REGEX)
+	  {
+	    int captcount = 0;
+	    if (pcre_fullinfo(serv->regex, serv->pextra, PCRE_INFO_CAPTURECOUNT, &captcount) == 0)
+	      {
+		/* C99 dyn-array, or alloca must be used */
+		int ovect[(captcount + 1) * 3];
+		if (pcre_exec(serv->regex, serv->pextra, qdomain, namelen, 0, 0, ovect, (captcount + 1) * 3) > 0)
+		  {
+		    domainlen = (unsigned int) (ovect[1] - ovect[0]);
+		    if (domainlen >= matchlen)
+		      serverhit = 1;
+		  }
+	      }
+	  }
+	else
+#endif
+	  {
+	domainlen = strlen(serv->domain);
 	char *matchstart = qdomain + namelen - domainlen;
 	if (namelen >= domainlen &&
 	    hostname_isequal(matchstart, serv->domain) &&
 	    (domainlen == 0 || namelen == domainlen || *(matchstart-1) == '.' ))
+	    serverhit = 1;
+	}
+
+	if (serverhit)
 	  {
 	    if ((serv->flags & SERV_NO_REBIND) && norebind)	
 	      *norebind = 1;
@@ -177,6 +203,10 @@ static unsigned int search_servers(time_t now, struct all_addr **addrpp, unsigne
 		  {
 		    *type = serv->flags & (SERV_HAS_DOMAIN | SERV_USE_RESOLV | SERV_NO_REBIND | SERV_DO_DNSSEC);
 		    *domain = serv->domain;
+#ifdef HAVE_REGEX
+		    if (serv->flags & SERV_IS_REGEX) *domain = qdomain;
+#endif
+
 		    matchlen = domainlen;
 		    if (serv->flags & SERV_NO_ADDR)
 		      flags = F_NXDOMAIN;
@@ -225,6 +255,35 @@ static unsigned int search_servers(time_t now, struct all_addr **addrpp, unsigne
       *domain = NULL;
     }
   return  flags;
+}
+
+static int match_domain_for_forward(char *domain, struct server *serv)
+{
+  int ret_val = 0;
+  if ( domain == NULL ){
+	  if (serv->domain == NULL){
+		  return 1;
+	  }else {
+		  return 0;
+	  }
+  }
+
+#if defined HAVE_REGEX
+  if(serv->flags & SERV_IS_REGEX)
+    {
+      int captcount = 0;
+      if (pcre_fullinfo(serv->regex, serv->pextra, PCRE_INFO_CAPTURECOUNT, &captcount) == 0)
+	{
+	  /* C99 dyn-array, or alloca must be used */
+	  int ovect[(captcount + 1) * 3];
+	  ret_val = pcre_exec(serv->regex, serv->pextra, domain,
+	                      strlen(domain), 0, 0, ovect, (captcount + 1) * 3) > 0;
+	}
+    }
+  else
+#endif
+    ret_val = hostname_isequal(domain, serv->domain);
+  return ret_val;
 }
 
 static int forward_query(int udpfd, union mysockaddr *udpaddr,
@@ -442,7 +501,7 @@ static int forward_query(int udpfd, union mysockaddr *udpaddr,
 	     must be NULL also. */
 	  
 	  if (type == (start->flags & SERV_TYPE) &&
-	      (type != SERV_HAS_DOMAIN || hostname_isequal(domain, start->domain)) &&
+	      (type != SERV_HAS_DOMAIN || match_domain_for_forward(domain, start)) &&
 	      !(start->flags & (SERV_LITERAL_ADDRESS | SERV_LOOP)))
 	    {
 	      int fd;
@@ -575,6 +634,21 @@ static size_t process_reply(struct dns_header *header, time_t now, struct server
       unsigned int matchlen = 0;
       for (ipset_pos = daemon->ipsets; ipset_pos; ipset_pos = ipset_pos->next) 
 	{
+#ifdef HAVE_REGEX
+	  if (ipset_pos->is_regex){
+		  int captcount = 0;
+		  if (pcre_fullinfo(ipset_pos->regex, ipset_pos->pextra, PCRE_INFO_CAPTURECOUNT, &captcount) == 0)
+		  {
+			  /* C99 dyn-array, or alloca must be used */
+			  int ovect[(captcount + 1) * 3];
+			  if (pcre_exec(ipset_pos->regex, ipset_pos->pextra, daemon->namebuff, namelen, 0, 0, ovect, (captcount + 1) * 3) > 0){
+				  sets = ipset_pos->sets;
+			  }
+		  }
+		  continue;
+	  }
+#endif
+
 	  unsigned int domainlen = strlen(ipset_pos->domain);
 	  char *matchstart = daemon->namebuff + namelen - domainlen;
 	  if (namelen >= domainlen && hostname_isequal(matchstart, ipset_pos->domain) &&
