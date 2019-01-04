@@ -111,7 +111,7 @@ DNSMASQ_OPTS="$DNSMASQ_OPTS --local-service"
 ROOT_DS="/usr/share/dns/root.ds"
 
 if [ -f $ROOT_DS ]; then
-    DNSMASQ_OPTS="$DNSMASQ_OPTS `sed -rne "s/^([.a-ZA-Z0-9]+)([[:space:]]+[0-9]+)*([[:space:]]+IN)*[[:space:]]+DS[[:space:]]+/--trust-anchor=\1,/;s/[[:space:]]+/,/gp" $ROOT_DS | tr '\n' ' '`"
+    DNSMASQ_OPTS="$DNSMASQ_OPTS `env LC_ALL=C sed -rne "s/^([.a-zA-Z0-9]+)([[:space:]]+[0-9]+)*([[:space:]]+IN)*[[:space:]]+DS[[:space:]]+/--trust-anchor=\1,/;s/[[:space:]]+/,/gp" $ROOT_DS | tr '\n' ' '`"
 fi
 
 start()
@@ -127,7 +127,8 @@ start()
            mkdir /run/dnsmasq || return 2
            chown dnsmasq:nogroup /run/dnsmasq || return 2
         fi
-
+	[ -x /sbin/restorecon ] && /sbin/restorecon /run/dnsmasq
+	
 	start-stop-daemon --start --quiet --pidfile /run/dnsmasq/$NAME.pid --exec $DAEMON --test > /dev/null || return 1
 	start-stop-daemon --start --quiet --pidfile /run/dnsmasq/$NAME.pid --exec $DAEMON -- \
 		-x /run/dnsmasq/$NAME.pid \
