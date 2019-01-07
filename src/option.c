@@ -2507,6 +2507,7 @@ static int one_opt(int option, char *arg, char *errstr, char *gen_err, int comma
 		  {
 		/* elide leading dots - they are implied in the search algorithm */
 		while (*arg == '.') arg++;
+		  }
 
 		/* # matches everything and becomes a zero length domain string */
 		if (strcmp(arg, "#") == 0)
