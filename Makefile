@@ -88,7 +88,7 @@ all : $(BUILDDIR)
 	@cd $(BUILDDIR) && $(MAKE) \
  top="$(top)" \
  build_cflags="$(version) $(dbus_cflags) $(idn2_cflags) $(idn_cflags) $(ct_cflags) $(lua_cflags) $(nettle_cflags) $(regex_cflags)" \
- build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(gmp_libs) $(ubus_libs)" $(regex_libs)" \
+ build_libs="$(dbus_libs) $(idn2_libs) $(idn_libs) $(ct_libs) $(lua_libs) $(sunos_libs) $(nettle_libs) $(gmp_libs) $(ubus_libs) $(regex_libs)" \
  -f $(top)/Makefile dnsmasq
 
 mostly_clean :
