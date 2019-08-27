@@ -134,21 +134,41 @@ static int dhcp6_maybe_relay(struct state *state, void *inbuff, size_t sz,
       else
 	{
 	  struct dhcp_context *c;
+	  struct shared_network *share = NULL;
 	  state->context = NULL;
-	   
+
 	  if (!IN6_IS_ADDR_LOOPBACK(state->link_address) &&
 	      !IN6_IS_ADDR_LINKLOCAL(state->link_address) &&
 	      !IN6_IS_ADDR_MULTICAST(state->link_address))
 	    for (c = daemon->dhcp6; c; c = c->next)
-	      if ((c->flags & CONTEXT_DHCP) &&
-		  !(c->flags & (CONTEXT_TEMPLATE | CONTEXT_OLD)) &&
-		  is_same_net6(state->link_address, &c->start6, c->prefix) &&
-		  is_same_net6(state->link_address, &c->end6, c->prefix))
-		{
-		  c->preferred = c->valid = 0xffffffff;
-		  c->current = state->context;
-		  state->context = c;
-		}
+	      {
+		for (share = daemon->shared_networks; share; share = share->next)
+		  {
+		    if (share->shared_addr.s_addr != 0)
+		      continue;
+		    
+		    if (share->if_index != 0 ||
+			!IN6_ARE_ADDR_EQUAL(state->link_address, &share->match_addr6))
+		      continue;
+		    
+		    if ((c->flags & CONTEXT_DHCP) &&
+			!(c->flags & (CONTEXT_TEMPLATE | CONTEXT_OLD)) &&
+			is_same_net6(&share->shared_addr6, &c->start6, c->prefix) &&
+			is_same_net6(&share->shared_addr6, &c->end6, c->prefix))
+		      break;
+		  }
+		
+		if (share ||
+		    ((c->flags & CONTEXT_DHCP) &&
+		     !(c->flags & (CONTEXT_TEMPLATE | CONTEXT_OLD)) &&
+		     is_same_net6(state->link_address, &c->start6, c->prefix) &&
+		     is_same_net6(state->link_address, &c->end6, c->prefix)))
+		  {
+		    c->preferred = c->valid = 0xffffffff;
+		    c->current = state->context;
+		    state->context = c;
+		  }
+	      }
 	  
 	  if (!state->context)
 	    {
@@ -219,21 +239,25 @@ static int dhcp6_maybe_relay(struct state *state, void *inbuff, size_t sz,
       if (opt6_ptr(opt, 0) + opt6_len(opt) > end) 
         return 0;
      
-      int o = new_opt6(opt6_type(opt));
-      if (opt6_type(opt) == OPTION6_RELAY_MSG)
+      /* Don't copy MAC address into reply. */
+      if (opt6_type(opt) != OPTION6_CLIENT_MAC)
 	{
-	  struct in6_addr align;
-	  /* the packet data is unaligned, copy to aligned storage */
-	  memcpy(&align, inbuff + 2, IN6ADDRSZ); 
-	  state->link_address = &align;
-	  /* zero is_unicast since that is now known to refer to the 
-	     relayed packet, not the original sent by the client */
-	  if (!dhcp6_maybe_relay(state, opt6_ptr(opt, 0), opt6_len(opt), client_addr, 0, now))
-	    return 0;
+	  int o = new_opt6(opt6_type(opt));
+	  if (opt6_type(opt) == OPTION6_RELAY_MSG)
+	    {
+	      struct in6_addr align;
+	      /* the packet data is unaligned, copy to aligned storage */
+	      memcpy(&align, inbuff + 2, IN6ADDRSZ); 
+	      state->link_address = &align;
+	      /* zero is_unicast since that is now known to refer to the 
+		 relayed packet, not the original sent by the client */
+	      if (!dhcp6_maybe_relay(state, opt6_ptr(opt, 0), opt6_len(opt), client_addr, 0, now))
+		return 0;
+	    }
+	  else
+	    put_opt6(opt6_ptr(opt, 0), opt6_len(opt));
+	  end_opt6(o);
 	}
-      else if (opt6_type(opt) != OPTION6_CLIENT_MAC)
-	put_opt6(opt6_ptr(opt, 0), opt6_len(opt));
-      end_opt6(o);	    
     }
   
   return 1;

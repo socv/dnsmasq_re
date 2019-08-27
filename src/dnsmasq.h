@@ -128,6 +128,7 @@ typedef unsigned long long u64;
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
 #include <netinet/ip_icmp.h>
+#include <netinet/tcp.h>
 #include <sys/uio.h>
 #include <syslog.h>
 #include <dirent.h>
@@ -136,6 +137,7 @@ typedef unsigned long long u64;
 #endif
 
 #if defined(HAVE_LINUX_NETWORK)
+#include <linux/sockios.h>
 #include <linux/capability.h>
 /* There doesn't seem to be a universally-available 
    userspace header for these. */
@@ -303,6 +305,10 @@ union all_addr {
     unsigned char algo;
     unsigned char digest; 
   } ds;
+  struct {
+    struct blockdata *target;
+    unsigned short targetlen, srvport, priority, weight;
+  } srv;
   /* for log_query */
   struct {
     unsigned short keytag, algo, digest, rcode;
@@ -430,7 +436,7 @@ struct crec {
   time_t ttd; /* time to die */
   /* used as class if DNSKEY/DS, index to source for F_HOSTS */
   unsigned int uid; 
-  unsigned short flags;
+  unsigned int flags;
   union {
     char sname[SMALLDNAME];
     union bigname *bname;
@@ -474,6 +480,7 @@ struct crec {
 #define F_NOEXTRA   (1u<<27)
 #define F_SERVFAIL  (1u<<28)
 #define F_RCODE     (1u<<29)
+#define F_SRV       (1u<<30)
 
 #define UID_NONE      0
 /* Values of uid in crecs with F_CONFIG bit set. */
@@ -800,6 +807,7 @@ struct dhcp_config {
 #define CONFIG_BANK           2048    /* from dhcp hosts file */
 #define CONFIG_ADDR6          4096
 #define CONFIG_WILDCARD       8192
+#define CONFIG_ADDR6_HOSTS   16384    /* address added by from /etc/hosts */
 
 struct dhcp_opt {
   int opt, len, flags;
@@ -917,6 +925,16 @@ struct dhcp_context {
   int flags;
   struct dhcp_netid netid, *filter;
   struct dhcp_context *next, *current;
+};
+
+struct shared_network {
+  int if_index;
+  struct in_addr match_addr, shared_addr;
+#ifdef HAVE_DHCP6
+  /* shared_addr == 0 for IP6 entries. */
+  struct in6_addr match_addr6, shared_addr6;
+#endif
+  struct shared_network *next;
 };
 
 #define CONTEXT_STATIC         (1u<<0)
@@ -1116,6 +1134,7 @@ extern struct daemon {
   struct ping_result *ping_results;
   FILE *lease_stream;
   struct dhcp_bridge *bridges;
+  struct shared_network *shared_networks;
 #ifdef HAVE_DHCP6
   int duid_len;
   unsigned char *duid;
@@ -1127,6 +1146,11 @@ extern struct daemon {
   void *dbus;
 #ifdef HAVE_DBUS
   struct watch *watches;
+#endif
+  /* UBus stuff */
+#ifdef HAVE_UBUS
+  /* void * here to avoid depending on ubus headers outside ubus.c */
+  void *ubus;
 #endif
 
   /* TFTP stuff */
@@ -1158,7 +1182,7 @@ void cache_end_insert(void);
 void cache_start_insert(void);
 int cache_recv_insert(time_t now, int fd);
 struct crec *cache_insert(char *name, union all_addr *addr, unsigned short class, 
-			  time_t now, unsigned long ttl, unsigned short flags);
+			  time_t now, unsigned long ttl, unsigned int flags);
 void cache_reload(void);
 void cache_add_dhcp_entry(char *host_name, int prot, union all_addr *host_address, time_t ttd);
 struct in_addr a_record_from_hosts(char *name, time_t now);
@@ -1174,7 +1198,6 @@ int read_hostsfile(char *filename, unsigned int index, int cache_size,
 		   struct crec **rhash, int hashsz);
 
 /* blockdata.c */
-#ifdef HAVE_DNSSEC
 void blockdata_init(void);
 void blockdata_report(void);
 struct blockdata *blockdata_alloc(char *data, size_t len);
@@ -1182,7 +1205,6 @@ void *blockdata_retrieve(struct blockdata *block, size_t len, void *data);
 struct blockdata *blockdata_read(int fd, size_t len);
 void blockdata_write(struct blockdata *block, size_t len, int fd);
 void blockdata_free(struct blockdata *blocks);
-#endif
 
 /* domain.c */
 char *get_domain(struct in_addr addr);
@@ -1217,9 +1239,6 @@ size_t resize_packet(struct dns_header *header, size_t plen,
 int add_resource_record(struct dns_header *header, char *limit, int *truncp,
 			int nameoffset, unsigned char **pp, unsigned long ttl, 
 			int *offset, unsigned short type, unsigned short class, char *format, ...);
-unsigned char *skip_questions(struct dns_header *header, size_t plen);
-int extract_name(struct dns_header *header, size_t plen, unsigned char **pp, 
-		 char *name, int isExtract, int extrabytes);
 int in_arpa_name_2_addr(char *namein, union all_addr *addrp);
 int private_net(struct in_addr addr, int ban_localhost);
 
@@ -1470,6 +1489,7 @@ void emit_dbus_signal(int action, struct dhcp_lease *lease, char *hostname);
 
 /* ubus.c */
 #ifdef HAVE_UBUS
+void ubus_init(void);
 void set_ubus_listeners(void);
 void check_ubus_listeners(void);
 void ubus_event_bcast(const char *type, const char *mac, const char *ip, const char *name, const char *interface);
@@ -1557,8 +1577,6 @@ void dhcp_update_configs(struct dhcp_config *configs);
 void display_opts(void);
 int lookup_dhcp_opt(int prot, char *name);
 int lookup_dhcp_len(int prot, int val);
-char *option_string(int prot, unsigned int opt, unsigned char *val, 
-		    int opt_len, char *buf, int buf_len);
 struct dhcp_config *find_config(struct dhcp_config *configs,
 				struct dhcp_context *context,
 				unsigned char *clid, int clid_len,

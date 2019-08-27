@@ -129,7 +129,7 @@ size_t answer_auth(struct dns_header *header, char *limit, size_t qlen, time_t n
 
   for (q = ntohs(header->qdcount); q != 0; q--)
     {
-      unsigned short flag = 0;
+      unsigned int flag = 0;
       int found = 0;
       int cname_wildcard = 0;
   
@@ -835,6 +835,9 @@ size_t answer_auth(struct dns_header *header, char *limit, size_t qlen, time_t n
       /* clear RA flag */
       header->hb4 &= ~HB4_RA;
     }
+
+  /* data is never DNSSEC signed. */
+  header->hb4 &= ~HB4_AD;
 
   /* authoritative */
   if (auth)
